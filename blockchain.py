@@ -1,7 +1,10 @@
+import streamlit as st
 import hashlib
 import time
+import json
 from typing import List
 
+# --- Blockchain Classes ---
 class Block:
     def __init__(self, index, timestamp, data, previous_hash):
         self.index = index
@@ -11,7 +14,7 @@ class Block:
         self.hash = self.calculate_hash()
 
     def calculate_hash(self):
-        content = f"{self.index}{self.timestamp}{self.data}{self.previous_hash}"
+        content = f"{self.index}{self.timestamp}{json.dumps(self.data, sort_keys=True)}{self.previous_hash}"
         return hashlib.sha256(content.encode()).hexdigest()
 
 class Blockchain:
@@ -30,14 +33,16 @@ class Blockchain:
             "seat_number": seat_number,
             "passenger": passenger_name
         }
+        if self.is_seat_taken(trip_id, seat_number):
+            return False, "🚫 Seat already booked!"
         new_block = Block(
             index=len(self.chain),
             timestamp=time.time(),
-            data=str(data),
+            data=data,
             previous_hash=self.get_latest_block().hash
         )
         self.chain.append(new_block)
-        print(f"✅ Booking added: {data}")
+        return True, f"✅ Booking added: {data}"
 
     def is_chain_valid(self):
         for i in range(1, len(self.chain)):
@@ -49,22 +54,54 @@ class Blockchain:
                 return False
         return True
 
-    def print_chain(self):
-        for block in self.chain:
-            print(f"\nBlock #{block.index}")
-            print(f"Time: {time.ctime(block.timestamp)}")
-            print(f"Data: {block.data}")
-            print(f"Hash: {block.hash}")
-            print(f"Prev: {block.previous_hash}")
+    def is_seat_taken(self, trip_id, seat_number):
+        for block in self.chain[1:]:  # skip genesis block
+            if isinstance(block.data, dict) and \
+               block.data["trip_id"] == trip_id and \
+               block.data["seat_number"] == seat_number:
+                return True
+        return False
 
-# 🔧 Demo
-if __name__ == "__main__":
-    chain = Blockchain()
-    chain.add_booking(trip_id="NYC-DC", seat_number=1, passenger_name="Alice")
-    chain.add_booking(trip_id="NYC-DC", seat_number=2, passenger_name="Bob")
-    chain.add_booking(trip_id="LA-SF", seat_number=1, passenger_name="Charlie")
+    def get_chain_data(self):
+        return [{
+            "index": block.index,
+            "timestamp": time.ctime(block.timestamp),
+            "data": block.data,
+            "hash": block.hash,
+            "previous_hash": block.previous_hash
+        } for block in self.chain]
 
-    print("\n🔗 Full Blockchain:")
-    chain.print_chain()
+# --- Streamlit UI ---
+st.set_page_config(page_title="🧾 Blockchain Booking System", layout="wide")
+st.title("🧾 Blockchain-Based Booking System")
 
-    print("\n⛓️ Chain Valid?", chain.is_chain_valid())
+# Persistent blockchain object
+if "blockchain" not in st.session_state:
+    st.session_state.blockchain = Blockchain()
+
+tab1, tab2 = st.tabs(["➕ Add Booking", "📜 View Blockchain"])
+
+with tab1:
+    st.subheader("Add a New Booking")
+
+    trip_id = st.text_input("Trip ID", placeholder="e.g. NYC-DC")
+    seat_number = st.number_input("Seat Number", min_value=1, step=1)
+    passenger_name = st.text_input("Passenger Name")
+
+    if st.button("Add Booking"):
+        if trip_id and passenger_name:
+            success, msg = st.session_state.blockchain.add_booking(
+                trip_id, seat_number, passenger_name
+            )
+            st.success(msg) if success else st.error(msg)
+        else:
+            st.warning("Please fill in all fields.")
+
+with tab2:
+    st.subheader("Blockchain Contents")
+    for block in st.session_state.blockchain.get_chain_data():
+        st.json(block)
+
+    if st.button("🔍 Validate Chain"):
+        valid = st.session_state.blockchain.is_chain_valid()
+        st.success("✅ Chain is valid!") if valid else st.error("❌ Chain is invalid!")
